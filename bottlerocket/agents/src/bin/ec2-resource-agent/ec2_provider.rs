@@ -788,7 +788,7 @@ impl Destroy for Ec2Destroyer {
 
         // Ensure the instances reach a terminated state.
         tokio::time::timeout(
-            Duration::from_secs(600),
+            Duration::from_secs(900),
             wait_for_conforming_instances(
                 &ec2_client,
                 &ids,
