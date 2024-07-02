@@ -1,11 +1,10 @@
 use agent_utils::aws::aws_config;
 use agent_utils::{impl_display_as_json, json_display};
-use aws_sdk_cloudformation::model::StackStatus;
-use aws_sdk_ec2::model::{Filter, Subnet};
-use aws_sdk_ec2::types::SdkError;
-use aws_sdk_eks::error::{DescribeClusterError, DescribeClusterErrorKind};
-use aws_sdk_eks::model::{Cluster, IpFamily};
-use aws_sdk_eks::output::DescribeClusterOutput;
+use aws_sdk_cloudformation::types::StackStatus;
+use aws_sdk_ec2::types::{Filter, Subnet};
+use aws_sdk_eks::error::SdkError as EksSdkError;
+use aws_sdk_eks::operation::describe_cluster::{DescribeClusterError, DescribeClusterOutput};
+use aws_sdk_eks::types::{Cluster, IpFamily};
 use aws_types::SdkConfig;
 use bottlerocket_agents::is_cluster_creation_required;
 use bottlerocket_types::agent_config::{
@@ -473,10 +472,6 @@ async fn nodegroup_iam_role(
     loop {
         if let Some(name) = list_stack_output
             .stack_summaries()
-            .context(
-                Resources::Remaining,
-                "Missing CloudFormation stack summaries",
-            )?
             .iter()
             .filter_map(|stack| stack.stack_name())
             .find(|name|
@@ -811,13 +806,7 @@ async fn instance_profile_arn(
             Resources::Remaining,
             format!("Unable to list instance profiles for role '{}'", role_name),
         )?
-        .instance_profiles
-        .ok_or_else(|| {
-            ProviderError::new_with_context(
-                Resources::Remaining,
-                "Instance profile list is missing from list_instance_profiles_for_role response",
-            )
-        })?;
+        .instance_profiles;
 
     if instance_profiles.len() > 1 {
         return Err(ProviderError::new_with_context(
@@ -836,15 +825,7 @@ async fn instance_profile_arn(
         )
     })?;
 
-    instance_profile.arn.ok_or_else(|| {
-        ProviderError::new_with_context(
-            Resources::Remaining,
-            format!(
-                "Received an instance profile object with no arn for role '{}'",
-                role_name
-            ),
-        )
-    })
+    Ok(instance_profile.arn)
 }
 
 async fn does_cluster_exist(name: &str, aws_clients: &AwsClients) -> ProviderResult<bool> {
@@ -865,12 +846,12 @@ async fn does_cluster_exist(name: &str, aws_clients: &AwsClients) -> ProviderRes
 }
 
 fn not_found(
-    result: &std::result::Result<DescribeClusterOutput, SdkError<DescribeClusterError>>,
+    result: &std::result::Result<DescribeClusterOutput, EksSdkError<DescribeClusterError>>,
 ) -> bool {
-    if let Err(SdkError::ServiceError(service_error)) = result {
+    if let Err(EksSdkError::ServiceError(service_error)) = result {
         if matches!(
-            &service_error.err().kind,
-            DescribeClusterErrorKind::ResourceNotFoundException(_)
+            &service_error.err(),
+            DescribeClusterError::ResourceNotFoundException(_)
         ) {
             return true;
         }

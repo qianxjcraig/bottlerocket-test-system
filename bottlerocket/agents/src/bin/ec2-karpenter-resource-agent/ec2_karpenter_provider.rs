@@ -1,8 +1,8 @@
 use agent_utils::aws::aws_config;
 use agent_utils::json_display;
-use aws_sdk_cloudformation::model::{Capability, Parameter, StackStatus};
-use aws_sdk_ec2::model::Tag;
-use aws_sdk_eks::model::{
+use aws_sdk_cloudformation::types::{Capability, Parameter, StackStatus};
+use aws_sdk_ec2::types::Tag;
+use aws_sdk_eks::types::{
     NodegroupScalingConfig, NodegroupStatus, Taint, TaintEffect, UpdateTaintsPayload,
 };
 use bottlerocket_types::agent_config::{
@@ -1014,8 +1014,8 @@ impl Destroy for Ec2KarpenterDestroyer {
             .context(Resources::Remaining, "Unable to list instance profiles")?;
         let instance_profile = instance_profile_out
             .instance_profiles()
-            .and_then(|profiles| profiles.first())
-            .and_then(|instance_profile| instance_profile.instance_profile_name().to_owned());
+            .first()
+            .map(|instance_profile| instance_profile.instance_profile_name().to_owned());
 
         if let Some(instance_profile) = instance_profile {
             iam_client
@@ -1133,8 +1133,7 @@ async fn wait_for_cloudformation_stack_deletion(
             .await
             .context(Resources::Remaining, "Unable to describe stack")?
             .stacks()
-            .map(|s| s.is_empty())
-            .unwrap_or_default()
+            .is_empty()
         {
             return Ok(());
         }

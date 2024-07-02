@@ -259,17 +259,15 @@ async fn create_vsphere_k8s_cluster(
     let ova_name = config.ova_name.to_owned();
     info!("Downloading OVA '{}'", &config.ova_name);
     let outdir = Path::new("/local/");
-    tokio::task::spawn_blocking(move || -> ProviderResult<()> {
-        download_target(
-            Resources::Clear,
-            &metadata_url,
-            &targets_url,
-            outdir,
-            &ova_name,
-        )
-    })
-    .await
-    .context(*resources, "Failed to join threads")??;
+
+    download_target(
+        Resources::Clear,
+        &metadata_url,
+        &targets_url,
+        outdir,
+        &ova_name,
+    )
+    .await?;
 
     // Update the import spec for the OVA
     let import_spec_output = Command::new("govc")

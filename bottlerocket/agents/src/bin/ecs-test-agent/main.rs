@@ -7,10 +7,11 @@ Tests whether an ECS task runs successfully.
 use agent_utils::aws::aws_config;
 use agent_utils::init_agent_logger;
 use async_trait::async_trait;
-use aws_sdk_ec2::types::SdkError;
-use aws_sdk_ecs::error::{DescribeTaskDefinitionError, DescribeTaskDefinitionErrorKind};
-use aws_sdk_ecs::model::{Compatibility, ContainerDefinition, LaunchType, TaskStopCode};
-use aws_sdk_ecs::output::DescribeTaskDefinitionOutput;
+use aws_sdk_ecs::error::SdkError as EcsSdkError;
+use aws_sdk_ecs::operation::describe_task_definition::{
+    DescribeTaskDefinitionError, DescribeTaskDefinitionOutput,
+};
+use aws_sdk_ecs::types::{Compatibility, ContainerDefinition, LaunchType, TaskStopCode};
 use bottlerocket_agents::constants::DEFAULT_TASK_DEFINITION;
 use bottlerocket_agents::error::{self, Error};
 use bottlerocket_types::agent_config::{EcsTestConfig, AWS_CREDENTIALS_SECRET_NAME};
@@ -83,13 +84,9 @@ where
             .context(error::TaskRunCreationSnafu)?;
         let task_arns: Vec<String> = run_task_output
             .tasks()
-            .map(|tasks| {
-                tasks
-                    .iter()
-                    .filter_map(|task| task.task_arn().map(|arn| arn.to_string()))
-                    .collect()
-            })
-            .unwrap();
+            .iter()
+            .filter_map(|task| task.task_arn().map(|arn| arn.to_string()))
+            .collect();
 
         info!("Waiting for tasks to complete...");
 
@@ -151,15 +148,13 @@ async fn test_results(
         .await
         .context(error::TaskDescribeSnafu)?
         .tasks()
-        .map(|tasks| tasks.to_owned())
-        .context(error::NoTaskSnafu)?;
+        .to_owned();
     let running_count = tasks
         .iter()
         .filter(|task| task.last_status() == Some("STOPPED"))
         .filter(|task| task.stop_code() == Some(&TaskStopCode::EssentialContainerExited))
         .filter(|task| {
             task.containers()
-                .unwrap_or_default()
                 .iter()
                 .filter(|container| container.exit_code() != Some(0))
                 .count()
@@ -191,7 +186,6 @@ async fn wait_for_registered_containers(
             .await
             .context(error::ClusterDescribeSnafu)?
             .clusters()
-            .context(error::NoTaskSnafu)?
             .first()
             .context(error::NoTaskSnafu)?
             .clone();
@@ -264,12 +258,12 @@ async fn latest_task_revision(ecs_client: &aws_sdk_ecs::Client) -> Result<String
 }
 
 fn exists(
-    result: Result<DescribeTaskDefinitionOutput, SdkError<DescribeTaskDefinitionError>>,
+    result: Result<DescribeTaskDefinitionOutput, EcsSdkError<DescribeTaskDefinitionError>>,
 ) -> bool {
-    if let Err(SdkError::ServiceError(service_error)) = result {
+    if let Err(EcsSdkError::ServiceError(service_error)) = result {
         if matches!(
-            &service_error.err().kind,
-            DescribeTaskDefinitionErrorKind::ClientException(_)
+            &service_error.err(),
+            DescribeTaskDefinitionError::ClientException(_)
         ) {
             return false;
         }

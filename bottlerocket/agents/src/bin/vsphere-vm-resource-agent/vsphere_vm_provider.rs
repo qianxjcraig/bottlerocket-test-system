@@ -216,11 +216,7 @@ impl Create for VMCreator {
         let ova_name = spec.configuration.ova_name.to_owned();
         info!("Downloading OVA '{}'", &spec.configuration.ova_name);
         let outdir = Path::new("/local/");
-        tokio::task::spawn_blocking(move || -> ProviderResult<()> {
-            download_target(resources, &metadata_url, &targets_url, outdir, &ova_name)
-        })
-        .await
-        .context(resources, "Failed to join threads")??;
+        download_target(resources, &metadata_url, &targets_url, outdir, &ova_name).await?;
 
         info!("Retrieving K8s cluster info");
         memo.current_status = "Retrieving K8s cluster info".to_string();

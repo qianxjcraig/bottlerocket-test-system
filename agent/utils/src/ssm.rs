@@ -1,10 +1,10 @@
 use crate::error::{self, Result};
-use aws_sdk_iam::types::SdkError;
-use aws_sdk_ssm::model::{InstanceInformation, InstanceInformationStringFilter, Tag};
+use aws_sdk_iam::error::SdkError as IamSdkError;
+use aws_sdk_ssm::types::{InstanceInformation, InstanceInformationStringFilter, Tag};
 use log::info;
 use serde_json::json;
 use snafu::{OptionExt, ResultExt};
-use std::thread::sleep;
+//use std::thread::sleep;
 use std::time::Duration;
 
 /// AWS Role to assign to the managed VM
@@ -21,7 +21,7 @@ pub async fn ensure_ssm_service_role(iam_client: &aws_sdk_iam::Client) -> Result
         .await;
     if let Err(sdk_err) = get_role_result {
         match sdk_err {
-            SdkError::ServiceError { .. } => {
+            IamSdkError::ServiceError { .. } => {
                 info!(
                     "'{}' service role does not exist, creating the service role",
                     SSM_MANAGED_INSTANCE_SERVICE_ROLE_NAME
@@ -82,7 +82,8 @@ pub async fn create_ssm_activation(
             Tag::builder()
                 .key("TESTSYS_MANAGED_INSTANCE")
                 .value(cluster_name)
-                .build(),
+                .build()
+                .context(error::BuildTagSnafu)?,
         )
         .send()
         .await
@@ -112,19 +113,21 @@ pub async fn wait_for_ssm_ready(
                 InstanceInformationStringFilter::builder()
                     .key("ActivationIds")
                     .values(activation_id)
-                    .build(),
+                    .build()
+                    .context(error::BuildInstanceInformationStringFilterSnafu)?,
             )
             .send()
             .await
             .context(error::GetManagedInstanceInfoSnafu {})?;
-        if let Some(info) = instance_info.instance_information_list().and_then(|list| {
-            list.iter()
-                .find(|info| info.ip_address == Some(ip.to_string()))
-        }) {
+        if let Some(info) = instance_info
+            .instance_information_list()
+            .iter()
+            .find(|info| info.ip_address == Some(ip.to_string()))
+        {
             return Ok(info.to_owned());
         } else {
             // SSM agent not ready on instance, wait then check again
-            sleep(seconds_between_checks)
+            tokio::time::sleep(seconds_between_checks).await
         }
     }
 }

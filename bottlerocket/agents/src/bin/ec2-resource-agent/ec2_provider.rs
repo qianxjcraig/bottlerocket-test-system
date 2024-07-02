@@ -1,14 +1,13 @@
 use agent_utils::aws::aws_config;
 use agent_utils::json_display;
-use aws_sdk_ec2::client::fluent_builders::RunInstances;
-use aws_sdk_ec2::error::RunInstancesError;
-use aws_sdk_ec2::model::{
+use aws_sdk_ec2::error::SdkError as Ec2SdkError;
+use aws_sdk_ec2::operation::run_instances::builders::RunInstancesFluentBuilder;
+use aws_sdk_ec2::operation::run_instances::{RunInstancesError, RunInstancesOutput};
+use aws_sdk_ec2::types::{
     ArchitectureValues, Filter, HttpTokensState, IamInstanceProfileSpecification,
     InstanceMetadataEndpointState, InstanceMetadataOptionsRequest, InstanceType, ResourceType, Tag,
     TagSpecification,
 };
-use aws_sdk_ec2::output::RunInstancesOutput;
-use aws_sdk_ec2::types::SdkError;
 use bottlerocket_agents::userdata::{decode_to_string, merge_values};
 use bottlerocket_types::agent_config::{
     ClusterType, CustomUserData, Ec2Config, AWS_CREDENTIALS_SECRET_NAME,
@@ -318,12 +317,15 @@ where
 }
 
 async fn wait_for_successful_run_instances(
-    run_instances: &RunInstances,
-) -> Result<RunInstancesOutput, SdkError<RunInstancesError>> {
+    run_instances: &RunInstancesFluentBuilder,
+) -> Result<RunInstancesOutput, Ec2SdkError<RunInstancesError>> {
     loop {
         let run_instance_result = run_instances.clone().send().await;
-        if let Err(SdkError::ServiceError(service_error)) = &run_instance_result {
-            if matches!(&service_error.err().code(), Some("InvalidParameterValue")) {
+        if let Err(Ec2SdkError::ServiceError(service_error)) = &run_instance_result {
+            if matches!(
+                &service_error.err().meta().code(),
+                Some("InvalidParameterValue")
+            ) {
                 warn!(
                     "An error occurred while trying to run instances '{}'. Retrying in 10s.",
                     service_error.err()
@@ -621,10 +623,7 @@ async fn deregister_ecs_container_instances(
             .await
         {
             // We expect a 1:1 mapping of EC2 instances to ECS container instances
-            if let Some(container_instance_id) = list_output
-                .container_instance_arns()
-                .and_then(|l| l.first())
-            {
+            if let Some(container_instance_id) = list_output.container_instance_arns().first() {
                 // Store this container instance ID so we can check it later in a separate loop
                 container_instances.push(container_instance_id.to_string());
                 if let Err(e) = ecs_client
@@ -674,7 +673,7 @@ async fn wait_for_ecs_instances_deregister(
             .await
         {
             Ok(list_output) => {
-                let listed_instances = list_output.container_instance_arns().unwrap_or_default();
+                let listed_instances = list_output.container_instance_arns();
                 if container_instances
                     .iter()
                     .all(|our_instance| !listed_instances.contains(our_instance))

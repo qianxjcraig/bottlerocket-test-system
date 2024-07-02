@@ -1,8 +1,9 @@
 use agent_utils::aws::aws_config;
-use aws_sdk_ec2::model::Filter;
-use aws_sdk_ec2::types::SdkError;
-use aws_sdk_iam::error::{GetInstanceProfileError, GetInstanceProfileErrorKind};
-use aws_sdk_iam::output::GetInstanceProfileOutput;
+use aws_sdk_ec2::types::Filter;
+use aws_sdk_iam::error::SdkError as IamSdkError;
+use aws_sdk_iam::operation::get_instance_profile::{
+    GetInstanceProfileError, GetInstanceProfileOutput,
+};
 use aws_types::sdk_config::SdkConfig;
 use bottlerocket_types::agent_config::{EcsClusterConfig, AWS_CREDENTIALS_SECRET_NAME};
 use log::{error, info};
@@ -249,11 +250,11 @@ async fn create_iam_instance_profile(iam_client: &aws_sdk_iam::Client) -> Provid
     }
 }
 
-fn exists(result: Result<GetInstanceProfileOutput, SdkError<GetInstanceProfileError>>) -> bool {
-    if let Err(SdkError::ServiceError(service_error)) = result {
+fn exists(result: Result<GetInstanceProfileOutput, IamSdkError<GetInstanceProfileError>>) -> bool {
+    if let Err(IamSdkError::ServiceError(service_error)) = result {
         if matches!(
-            &service_error.err().kind,
-            GetInstanceProfileErrorKind::NoSuchEntityException(_)
+            service_error.err(),
+            GetInstanceProfileError::NoSuchEntityException(_)
         ) {
             return false;
         }
@@ -272,7 +273,7 @@ async fn instance_profile_arn(
         .await
         .context(Resources::Remaining, "Unable to get instance profile.")?
         .instance_profile()
-        .and_then(|instance_profile| instance_profile.arn())
+        .map(|instance_profile| instance_profile.arn())
         .context(
             Resources::Remaining,
             "Instance profile does not contain an arn.",
@@ -314,7 +315,8 @@ async fn default_vpc(ec2_client: &aws_sdk_ec2::Client) -> ProviderResult<String>
         .await
         .context(Resources::Remaining, "VPC list is missing.")?
         .vpcs()
-        .and_then(|vpcs| vpcs.first().and_then(|vpc| vpc.vpc_id()))
+        .first()
+        .and_then(|vpc| vpc.vpc_id())
         .context(Resources::Remaining, "The default vpc has no vpc id.")?
         .to_string())
 }
@@ -337,7 +339,6 @@ async fn subnet_ids(
         .await
         .context(Resources::Remaining, "Unable to get subnet information.")?
         .subnets()
-        .context(Resources::Remaining, "Unable to get subnets.")?
         .iter()
         .filter_map(
             |subnet| match (subnet.map_public_ip_on_launch(), &subnet_type) {
@@ -439,14 +440,13 @@ async fn wait_for_ecs_instances_deregister(
                 "Unable to list container instances for ECS cluster",
             )?
             .container_instance_arns()
-            .map(|l| l.to_vec());
+            .to_vec();
 
-        if let Some(container_instances) = container_instances.filter(|list| !list.is_empty()) {
-            for arn in container_instances {
-                info!("Waiting on ECS instance '{}' to deregister...", arn)
-            }
-        } else {
+        if container_instances.is_empty() {
             return Ok(());
+        }
+        for arn in container_instances {
+            info!("Waiting on ECS instance '{}' to deregister...", arn)
         }
 
         tokio::time::sleep(Duration::from_secs(10)).await;
