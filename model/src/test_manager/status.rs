@@ -4,10 +4,13 @@ use serde::Serialize;
 use std::cmp::max;
 use std::fmt::Display;
 use tabled::builder::Builder;
-use tabled::locator::ByColumnName;
-use tabled::object::Rows;
-use tabled::width::MinWidth;
-use tabled::{Alignment, Disable, Modify, Style, Table, Width};
+use tabled::settings::{
+    location::ByColumnName,
+    object::Rows,
+    width::{MinWidth, Width},
+    Alignment, Disable, Modify, Style,
+};
+use tabled::Table;
 
 #[derive(Clone)]
 pub struct StatusColumn {
@@ -172,8 +175,8 @@ impl From<&StatusSnapshot> for Table {
         let mut table = Builder::from_iter(status_data)
             .index()
             // index is needed to use `transpose` however, we don't want the index to show, so
-            // `hide_index` is used as well.
-            .hide_index()
+            // `hide` is used as well.
+            .hide()
             .transpose()
             .to_owned()
             .build();

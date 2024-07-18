@@ -27,26 +27,22 @@ pub(crate) fn build_struct(ast: &syn::DeriveInput) -> TokenStream {
         .attrs
         .iter()
         .filter_map(|v| {
-            v.parse_meta().ok().map(|meta| {
-                if meta.path().is_ident("crd") {
-                    v.parse_args::<LitStr>().ok()
-                } else {
-                    None
-                }
-            })
+            if v.meta.path().is_ident("crd") {
+                v.parse_args::<LitStr>().ok()
+            } else {
+                None
+            }
         })
         .last()
-        .flatten()
         .expect("`crd` is a required attribute (Test, Resource)")
         .value();
 
     // Get a list of fields and their types
     let fields = data.fields.iter().filter_map(|field| {
-        let attrs = field.attrs.iter().filter(|v| {
-            v.parse_meta()
-                .map(|meta| meta.path().is_ident("doc") || meta.path().is_ident("serde"))
-                .unwrap_or(false)
-        });
+        let attrs = field
+            .attrs
+            .iter()
+            .filter(|v| v.meta.path().is_ident("doc") || v.meta.path().is_ident("serde"));
         let field_name = match field.ident.as_ref() {
             Some(ident) => ident.to_string(),
             None => return None,
@@ -61,9 +57,7 @@ pub(crate) fn build_struct(ast: &syn::DeriveInput) -> TokenStream {
     // Create the setters for each field, one for typed values and one for templated strings
     let setters = data.fields.iter().filter_map(|field| {
         let doc = field.attrs.iter().filter(|v| {
-            v.parse_meta()
-                .map(|meta| meta.path().is_ident("doc"))
-                .unwrap_or(false)
+                v.meta.path().is_ident("doc")
         });
         let field_name = match field.ident.as_ref() {
             Some(ident) => ident.to_string(),

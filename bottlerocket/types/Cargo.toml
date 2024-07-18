@@ -11,5 +11,5 @@ builder-derive = { version = "0.0.13", path = "../../agent/builder-derive" }
 testsys-model = { version = "0.0.13", path = "../../model" }
 serde = "1"
 serde_plain = "1"
-serde_yaml = "0.8"
+serde_yaml = "0.9"
 serde_json = "1"
