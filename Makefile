@@ -176,11 +176,16 @@ integ-test: $(if $(TESTSYS_SELFTEST_SKIP_IMAGE_BUILDS), ,controller example-test
 	docker tag duplicator-resource-agent duplicator-resource-agent:integ
 	cargo test --features integ -- --test-threads=$(TESTSYS_SELFTEST_THREADS)
 
-cargo-deny:
-	# Install cargo-deny to CARGO_HOME which is set to be .cargo in this repository
-	cargo install --version 0.9.1 cargo-deny --locked
-	cargo fetch
-	cargo deny --all-features --no-default-features check --disable-fetch licenses sources
+cargo-deny: fetch
+	docker run --rm \
+		--network none \
+		--user "$(shell id -u):$(shell id -g)" \
+		--security-opt label=disable \
+		--env CARGO_HOME="/src/.cargo" \
+		--volume "$(TOP):/src" \
+		--workdir "/src/" \
+		"$(BUILDER_IMAGE)" \
+		bash -c "cargo deny --all-features check --disable-fetch licenses bans sources"
 
 # Define a target to tag all images
 tag-images: $(TAG_IMAGES)  ## tag all images
