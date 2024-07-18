@@ -22,8 +22,7 @@ jobs:
       labels: bottlerocket_ubuntu-latest_8-core
     steps:
       - uses: actions/checkout@v3
-      - run: rustup default 1.72 && rustup component add rustfmt && rustup component add clippy
-      - run: make build
+      - run: make sdk-build
         # If we forget to add yamlgen changes to our commits, this will fail.
       - name: ensure that git is clean
         run: test -z "$(git status --untracked-files=all --porcelain)"
@@ -50,5 +49,4 @@ jobs:
     if: ${{ github.event_name == 'pull_request' }}
     steps:
       - uses: actions/checkout@v3
-      - run: rustup default 1.72
       - run: make cargo-deny
