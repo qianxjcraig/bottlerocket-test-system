@@ -1,6 +1,8 @@
 use agent_utils::aws::aws_config;
 use agent_utils::base64_decode_write_file;
 use agent_utils::ssm::{create_ssm_activation, ensure_ssm_service_role, wait_for_ssm_ready};
+use base64::engine::general_purpose::STANDARD as Base64;
+use base64::Engine;
 use bottlerocket_agents::constants::TEST_CLUSTER_KUBECONFIG_PATH;
 use bottlerocket_agents::tuf::{download_target, tuf_repo_urls};
 use bottlerocket_agents::userdata::{decode_to_string, merge_values};
@@ -117,7 +119,7 @@ impl Create for VMCreator {
         let (metadata_url, targets_url) = tuf_repo_urls(&spec.configuration.tuf_repo, &resources)?;
 
         memo.aws_secret_name = spec.secrets.get(AWS_CREDENTIALS_SECRET_NAME).cloned();
-        memo.assume_role = spec.configuration.assume_role.clone();
+        memo.assume_role.clone_from(&spec.configuration.assume_role);
 
         let shared_config = aws_config(
             &spec.secrets.get(AWS_CREDENTIALS_SECRET_NAME),
@@ -216,11 +218,7 @@ impl Create for VMCreator {
         let ova_name = spec.configuration.ova_name.to_owned();
         info!("Downloading OVA '{}'", &spec.configuration.ova_name);
         let outdir = Path::new("/local/");
-        tokio::task::spawn_blocking(move || -> ProviderResult<()> {
-            download_target(resources, &metadata_url, &targets_url, outdir, &ova_name)
-        })
-        .await
-        .context(resources, "Failed to join threads")??;
+        download_target(resources, &metadata_url, &targets_url, outdir, &ova_name).await?;
 
         info!("Retrieving K8s cluster info");
         memo.current_status = "Retrieving K8s cluster info".to_string();
@@ -350,21 +348,21 @@ impl Create for VMCreator {
                 ),
             ));
         }
-        memo.vm_template = vm_template_name.to_owned();
+        vm_template_name.clone_into(&mut memo.vm_template);
 
         let vm_count = spec.configuration.vm_count.unwrap_or(DEFAULT_VM_COUNT);
         // Generate SSM activation codes and IDs
         let activation = create_ssm_activation(&vsphere_cluster.name, vm_count, &ssm_client)
             .await
             .context(resources, "Unable to create SSM activation")?;
-        memo.ssm_activation_id = activation.0.to_owned();
+        activation.0.clone_into(&mut memo.ssm_activation_id);
         let control_host_ctr_userdata = json!({"ssm":{"activation-id": activation.0.to_string(), "activation-code":activation.1.to_string(),"region":"us-west-2"}});
         debug!(
             "Control container host container userdata: {}",
             control_host_ctr_userdata
         );
         let encoded_control_host_ctr_userdata =
-            base64::encode(control_host_ctr_userdata.to_string());
+            Base64.encode(control_host_ctr_userdata.to_string());
 
         let custom_user_data = spec.configuration.custom_user_data;
 
@@ -546,10 +544,10 @@ fn userdata(
                 .context(Resources::Clear, "Failed to parse TOML")?;
             merge_values(&merge_from, merge_into)
                 .context(Resources::Clear, "Failed to merge TOML")?;
-            Ok(base64::encode(toml::to_string(merge_into).context(
-                Resources::Clear,
-                "Failed to serialize merged TOML",
-            )?))
+            Ok(Base64.encode(
+                toml::to_string(merge_into)
+                    .context(Resources::Clear, "Failed to serialize merged TOML")?,
+            ))
         }
     }
 }
@@ -561,7 +559,7 @@ fn default_userdata(
     certificate: &str,
     control_container_userdata: &str,
 ) -> String {
-    base64::encode(format!(
+    Base64.encode(format!(
         r#"[settings.updates]
 ignore-waves = true
 

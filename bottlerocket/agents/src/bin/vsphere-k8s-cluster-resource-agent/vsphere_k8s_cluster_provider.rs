@@ -1,4 +1,6 @@
 use agent_utils::base64_decode_write_file;
+use base64::engine::general_purpose::STANDARD as Base64;
+use base64::Engine;
 use bottlerocket_agents::clusters::{
     download_eks_a_bundle, install_eks_a_binary, retrieve_workload_cluster_kubeconfig,
     write_validate_mgmt_kubeconfig,
@@ -259,17 +261,15 @@ async fn create_vsphere_k8s_cluster(
     let ova_name = config.ova_name.to_owned();
     info!("Downloading OVA '{}'", &config.ova_name);
     let outdir = Path::new("/local/");
-    tokio::task::spawn_blocking(move || -> ProviderResult<()> {
-        download_target(
-            Resources::Clear,
-            &metadata_url,
-            &targets_url,
-            outdir,
-            &ova_name,
-        )
-    })
-    .await
-    .context(*resources, "Failed to join threads")??;
+
+    download_target(
+        Resources::Clear,
+        &metadata_url,
+        &targets_url,
+        outdir,
+        &ova_name,
+    )
+    .await?;
 
     // Update the import spec for the OVA
     let import_spec_output = Command::new("govc")
@@ -322,7 +322,7 @@ async fn create_vsphere_k8s_cluster(
         ));
     }
     *resources = Resources::Remaining;
-    memo.vm_template = vm_template_name.to_owned();
+    vm_template_name.clone_into(&mut memo.vm_template);
 
     // EKS-A expects tags on the VM template
     let vm_full_path = format!(
@@ -600,7 +600,7 @@ spec:
 "###
     );
     debug!("{}", &clusterspec);
-    memo.encoded_clusterspec = base64::encode(&clusterspec);
+    memo.encoded_clusterspec = Base64.encode(&clusterspec);
     fs::write(clusterspec_path, clusterspec).context(
         resources,
         format!(

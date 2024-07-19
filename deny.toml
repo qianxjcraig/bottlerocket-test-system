@@ -1,10 +1,5 @@
 [licenses]
-unlicensed = "deny"
-
-# Deny licenses unless they are specifically listed here
-copyleft = "deny"
-allow-osi-fsf-free = "neither"
-default = "deny"
+version = 2
 
 # We want really high confidence when inferring licenses from text
 confidence-threshold = 0.93
@@ -25,6 +20,24 @@ allow = [
 ]
 
 exceptions = [ { allow = [ "MPL-2.0" ], name = "webpki-roots" } ]
+
+[bans]
+multiple-versions = "deny"
+wildcards = "deny"
+
+skip = [
+    # many crates still use syn v1
+    "syn@1",
+
+    # tabled uses an older version of heck
+    "heck@0.4.1",
+]
+
+skip-tree = [
+    { crate = "windows-sys" },
+    # aws-smithy-runtime uses many older dependencies
+    { crate = "aws-smithy-runtime@1.6.2" },
+]
 
 # https://github.com/hsivonen/encoding_rs The non-test code that isn't generated from the WHATWG data in this crate is
 # under Apache-2.0 OR MIT. Test code is under CC0.

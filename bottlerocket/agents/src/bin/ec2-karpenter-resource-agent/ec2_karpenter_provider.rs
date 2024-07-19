@@ -1,8 +1,8 @@
 use agent_utils::aws::aws_config;
 use agent_utils::json_display;
-use aws_sdk_cloudformation::model::{Capability, Parameter, StackStatus};
-use aws_sdk_ec2::model::Tag;
-use aws_sdk_eks::model::{
+use aws_sdk_cloudformation::types::{Capability, Parameter, StackStatus};
+use aws_sdk_ec2::types::Tag;
+use aws_sdk_eks::types::{
     NodegroupScalingConfig, NodegroupStatus, Taint, TaintEffect, UpdateTaintsPayload,
 };
 use bottlerocket_types::agent_config::{
@@ -119,8 +119,9 @@ impl Create for Ec2KarpenterCreator {
             .context(resources, "Error sending cluster creation message")?;
 
         memo.aws_secret_name = spec.secrets.get(AWS_CREDENTIALS_SECRET_NAME).cloned();
-        memo.assume_role = spec.configuration.assume_role.clone();
-        memo.cluster_name = spec.configuration.cluster_name.clone();
+        memo.assume_role.clone_from(&spec.configuration.assume_role);
+        memo.cluster_name
+            .clone_from(&spec.configuration.cluster_name);
 
         info!("Creating AWS config");
         memo.current_status = "Creating AWS config".to_string();
@@ -520,7 +521,7 @@ impl Create for Ec2KarpenterCreator {
 kind: NodePool
 metadata:
     name: default
-spec: 
+spec:
   template:
     spec:
         nodeClassRef:
@@ -541,7 +542,7 @@ metadata:
 spec:
     amiFamily: Bottlerocket
     role: "KarpenterNodeRole-{}"
-    amiSelectorTerms: 
+    amiSelectorTerms:
       - id: {}
     subnetSelectorTerms:
         - tags:
@@ -834,8 +835,9 @@ impl Destroy for Ec2KarpenterDestroyer {
             .context(resources, "Error sending cluster creation message")?;
 
         memo.aws_secret_name = spec.secrets.get(AWS_CREDENTIALS_SECRET_NAME).cloned();
-        memo.assume_role = spec.configuration.assume_role.clone();
-        memo.cluster_name = spec.configuration.cluster_name.clone();
+        memo.assume_role.clone_from(&spec.configuration.assume_role);
+        memo.cluster_name
+            .clone_from(&spec.configuration.cluster_name);
 
         info!("Creating AWS config");
         memo.current_status = "Creating AWS config".to_string();
@@ -1012,8 +1014,8 @@ impl Destroy for Ec2KarpenterDestroyer {
             .context(Resources::Remaining, "Unable to list instance profiles")?;
         let instance_profile = instance_profile_out
             .instance_profiles()
-            .and_then(|profiles| profiles.first())
-            .and_then(|instance_profile| instance_profile.instance_profile_name().to_owned());
+            .first()
+            .map(|instance_profile| instance_profile.instance_profile_name().to_owned());
 
         if let Some(instance_profile) = instance_profile {
             iam_client
@@ -1131,8 +1133,7 @@ async fn wait_for_cloudformation_stack_deletion(
             .await
             .context(Resources::Remaining, "Unable to describe stack")?
             .stacks()
-            .map(|s| s.is_empty())
-            .unwrap_or_default()
+            .is_empty()
         {
             return Ok(());
         }

@@ -26,6 +26,8 @@ k8s artifacts included in the workload cluster config are deleted.
 use agent_utils::aws::aws_config;
 use agent_utils::base64_decode_write_file;
 use agent_utils::ssm::{create_ssm_activation, ensure_ssm_service_role, wait_for_ssm_ready};
+use base64::engine::general_purpose::STANDARD as Base64;
+use base64::Engine;
 use bottlerocket_agents::clusters::{
     download_eks_a_bundle, install_eks_a_binary, retrieve_workload_cluster_kubeconfig,
     write_validate_mgmt_kubeconfig,
@@ -122,7 +124,7 @@ impl Create for MetalK8sClusterCreator {
             .context(resources, "Error sending cluster creation message")?;
 
         memo.aws_secret_name = spec.secrets.get(AWS_CREDENTIALS_SECRET_NAME).cloned();
-        memo.assume_role = spec.configuration.assume_role.clone();
+        memo.assume_role.clone_from(&spec.configuration.assume_role);
 
         let shared_config = aws_config(
             &spec.secrets.get(AWS_CREDENTIALS_SECRET_NAME),
@@ -179,7 +181,8 @@ impl Create for MetalK8sClusterCreator {
                 "Unable to decode and write hardware requirements",
             )?;
 
-        let decoded_config = base64::decode(&spec.configuration.cluster_config_base64)
+        let decoded_config = Base64
+            .decode(&spec.configuration.cluster_config_base64)
             .context(Resources::Clear, "Unable to decode eksctl configuration.")?;
 
         let deserialized_config = serde_yaml::Deserializer::from_slice(decoded_config.as_slice())
@@ -296,7 +299,7 @@ impl Create for MetalK8sClusterCreator {
         let k8s_client = kube::client::Client::try_from(
             Config::from_custom_kubeconfig(
                 Kubeconfig::from_yaml(&String::from_utf8_lossy(
-                    &base64::decode(&encoded_kubeconfig).context(
+                    &Base64.decode(&encoded_kubeconfig).context(
                         resources,
                         "Unable to decode encoded workload cluster kubeconfig",
                     )?,
@@ -336,13 +339,22 @@ impl Create for MetalK8sClusterCreator {
             create_ssm_activation(&cluster_name, machine_ips.len() as i32, &ssm_client)
                 .await
                 .context(resources, "Unable to create SSM activation")?;
-        memo.ssm_activation_id = activation.0.to_owned();
+        activation.0.clone_into(&mut memo.ssm_activation_id);
         let control_host_ctr_userdata = json!({"ssm":{"activation-id": activation.0.to_string(), "activation-code":activation.1.to_string(),"region":"us-west-2"}});
         debug!(
             "Control container host container userdata: {}",
             control_host_ctr_userdata
         );
-        let ssm_json = json!({"host-containers":{"control":{"enabled":true, "user-data": base64::encode(control_host_ctr_userdata.to_string())}}});
+        let ssm_json = json!({
+            "host-containers": {
+                "control": {
+                    "enabled": true,
+                    "user-data": Base64.encode(
+                        control_host_ctr_userdata.to_string())
+                    }
+                }
+            }
+        );
 
         let custom_settings = &spec
             .configuration
@@ -351,7 +363,7 @@ impl Create for MetalK8sClusterCreator {
                 CustomUserData::Replace { encoded_userdata }
                 | CustomUserData::Merge { encoded_userdata } => encoded_userdata,
             })
-            .map(base64::decode)
+            .map(|userdata| Base64.decode(userdata))
             .transpose()
             .context(resources, "Unable to decode custom user data")?
             .map(|userdata| toml::from_slice::<serde_json::Value>(&userdata))
@@ -464,7 +476,7 @@ impl Create for MetalK8sClusterCreator {
 
         // We are done, set our custom status to say so.
         memo.current_status = "Cluster created".into();
-        memo.instance_ids = instance_ids.clone();
+        memo.instance_ids.clone_from(&instance_ids);
 
         client
             .send_info(memo.clone())

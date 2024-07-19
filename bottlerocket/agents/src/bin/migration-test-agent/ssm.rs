@@ -1,6 +1,6 @@
-use aws_sdk_ec2::types::SdkError;
-use aws_sdk_ssm::error::DescribeDocumentErrorKind;
-use aws_sdk_ssm::model::{
+use aws_sdk_ssm::error::SdkError as SsmSdkError;
+use aws_sdk_ssm::operation::describe_document::DescribeDocumentError;
+use aws_sdk_ssm::types::{
     CommandInvocation, CommandInvocationStatus, DocumentFormat, DocumentType,
     InstanceInformationStringFilter,
 };
@@ -29,15 +29,13 @@ pub(crate) async fn wait_for_ssm_ready(
                 InstanceInformationStringFilter::builder()
                     .key("InstanceIds")
                     .set_values(Some(instance_ids.iter().cloned().collect::<Vec<_>>()))
-                    .build(),
+                    .build()
+                    .context(error::BuildInstanceInformationStringFilterSnafu)?,
             )
             .send()
             .await
             .context(error::SsmDescribeInstanceInfoSnafu)?;
-        num_ready = instance_info
-            .instance_information_list()
-            .map(|list| list.len())
-            .context(error::SsmInstanceInfoSnafu)?;
+        num_ready = instance_info.instance_information_list().len();
         sleep(sec_between_checks);
     }
 
@@ -61,9 +59,9 @@ pub(crate) async fn create_or_update_ssm_document(
         Ok(doc) => doc.document().and_then(|d| d.hash().map(|s| s.to_string())),
         Err(sdk_err) => {
             return match sdk_err {
-                SdkError::ServiceError(service_error) => {
-                    match service_error.err().kind {
-                        DescribeDocumentErrorKind::InvalidDocument(_) => {
+                SsmSdkError::ServiceError(service_error) => {
+                    match service_error.err() {
+                        DescribeDocumentError::InvalidDocument(_) => {
                             // Document does not exist, we need to create it.
                             let file_doc_data =
                                 fs::read_to_string(document_path).context(error::FileReadSnafu)?;

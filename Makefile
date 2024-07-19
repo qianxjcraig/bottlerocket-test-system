@@ -1,3 +1,6 @@
+.ONESHELL:
+SHELL = /bin/bash
+
 # Set our default to print out help if user has not provided a target
 .DEFAULT_GOAL := help
 
@@ -5,11 +8,11 @@
 TOP := $(dir $(firstword $(MAKEFILE_LIST)))
 
 # Variables we update as newer versions are released
-BOTTLEROCKET_SDK_VERSION = v0.37.0
+BOTTLEROCKET_SDK_VERSION = v0.42.0
 BOTTLEROCKET_SDK_ARCH = $(TESTSYS_BUILD_HOST_UNAME_ARCH)
 BOTTLEROCKET_TOOLS_VERSION ?= v0.8.0
 
-BUILDER_IMAGE = public.ecr.aws/bottlerocket/bottlerocket-sdk-$(BOTTLEROCKET_SDK_ARCH):$(BOTTLEROCKET_SDK_VERSION)
+BUILDER_IMAGE = public.ecr.aws/bottlerocket/bottlerocket-sdk:$(BOTTLEROCKET_SDK_VERSION)
 TOOLS_IMAGE ?= public.ecr.aws/bottlerocket-test-system/bottlerocket-test-tools:$(BOTTLEROCKET_TOOLS_VERSION)
 
 # Capture information about the build host
@@ -61,7 +64,14 @@ show-variables:
 
 # Fetches crates from upstream
 fetch:
-	cargo fetch --locked
+	docker run --rm \
+		--user "$(shell id -u):$(shell id -g)" \
+		--security-opt label=disable \
+		--env CARGO_HOME="/src/.cargo" \
+		--volume "$(TOP):/src" \
+		--workdir "/src/" \
+		"$(BUILDER_IMAGE)" \
+		bash -ex -c "cargo fetch --locked"
 
 images: fetch $(IMAGES)
 
@@ -79,14 +89,36 @@ print-image-names:
 	$(info $(IMAGES))
 	@echo > /dev/null
 
-build: fetch  ## build, lint, and test the Rust workspace
-	cargo fmt -- --check
-	cargo clippy --locked -- -D warnings
-	cargo build --locked
-	cargo test --locked
-	cargo test --features integ --no-run
-	# We've seen cases where this can fail with a version conflict, so we need to make sure it's working
-	cargo install --path ./cli --force --locked
+define BUILD_SCRIPT
+cargo fmt -- --check
+cargo clippy --locked -- -D warnings
+cargo build --locked
+
+cargo test --locked --lib --bins --tests
+# Only run doc tests when rustdoc is available (the SDK does not include it.)
+if [[ $(command -v rustdoc) ]]; then
+    cargo test --locked --doc
+fi
+cargo test --features integ --no-run --lib --bins --tests
+# We've seen cases where this can fail with a version conflict, so we need to make sure it's working
+cargo install --path ./cli --force --locked
+endef
+
+# Builds using the locally-installed rust toolchain
+build: fetch
+	$(value BUILD_SCRIPT)
+
+# Builds using the rust toolchain in the Bottlerocket SDK
+sdk-build: fetch
+	docker run --rm \
+		--network none \
+		--user "$(shell id -u):$(shell id -g)" \
+		--security-opt label=disable \
+		--env CARGO_HOME="/src/.cargo" \
+		--volume "$(TOP):/src" \
+		--workdir "/src/" \
+		"$(BUILDER_IMAGE)" \
+		bash -ex -c '$(value BUILD_SCRIPT)'
 
 # Build the container image for the example test-agent program
 example-test-agent: show-variables fetch
@@ -166,7 +198,7 @@ $(AGENT_IMAGES): show-variables fetch
 #                                      integration tests run Kubernetes clusters in kind which can be resource-intensive
 #                                      for some machines.
 integ-test:  ## run integration tests
-integ-test: export TESTSYS_SELFTEST_KIND_PATH := $(shell pwd)/bin/kind
+integ-test: export TESTSYS_SELFTEST_KIND_PATH := /src/bin/kind
 integ-test: TESTSYS_SELFTEST_THREADS ?= 1
 integ-test: $(if $(TESTSYS_SELFTEST_SKIP_IMAGE_BUILDS), ,controller example-test-agent duplicator-resource-agent)
 	$(shell pwd)/bin/download-kind.sh --platform $(TESTSYS_BUILD_HOST_PLATFORM) --goarch ${TESTSYS_BUILD_HOST_GOARCH}
@@ -174,13 +206,32 @@ integ-test: $(if $(TESTSYS_SELFTEST_SKIP_IMAGE_BUILDS), ,controller example-test
 	docker tag controller controller:integ
 	docker tag example-test-agent-cli  example-test-agent-cli:integ
 	docker tag duplicator-resource-agent duplicator-resource-agent:integ
-	cargo test --features integ -- --test-threads=$(TESTSYS_SELFTEST_THREADS)
+	docker run --rm \
+		--userns=host \
+		--network=host \
+		--user "$(shell id -u):$(shell getent group docker | cut -d: -f3)" \
+		--security-opt label=disable \
+		--env CARGO_HOME="/src/.cargo" \
+		--volume "$(TOP):/src" \
+		--volume '/var/run/docker.sock:/var/run/docker.sock' \
+		--workdir "/src/" \
+		-e TESTSYS_SELFTEST_KIND_PATH='$(TESTSYS_SELFTEST_KIND_PATH)' \
+		"$(BUILDER_IMAGE)" \
+		bash -ex -c 'cargo test \
+			--features integ \
+			--lib --bins --tests \
+			-- --test-threads=$(TESTSYS_SELFTEST_THREADS)'
 
-cargo-deny:
-	# Install cargo-deny to CARGO_HOME which is set to be .cargo in this repository
-	cargo install --version 0.9.1 cargo-deny --locked
-	cargo fetch
-	cargo deny --all-features --no-default-features check --disable-fetch licenses sources
+cargo-deny: fetch
+	docker run --rm \
+		--network none \
+		--user "$(shell id -u):$(shell id -g)" \
+		--security-opt label=disable \
+		--env CARGO_HOME="/src/.cargo" \
+		--volume "$(TOP):/src" \
+		--workdir "/src/" \
+		"$(BUILDER_IMAGE)" \
+		bash -ex -c "cargo deny --all-features check --disable-fetch licenses bans sources"
 
 # Define a target to tag all images
 tag-images: $(TAG_IMAGES)  ## tag all images

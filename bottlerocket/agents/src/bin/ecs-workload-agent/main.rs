@@ -38,9 +38,9 @@ spec:
 use agent_utils::aws::aws_config;
 use agent_utils::init_agent_logger;
 use async_trait::async_trait;
-use aws_sdk_ec2::types::SdkError;
-use aws_sdk_ecs::error::DescribeTaskDefinitionErrorKind;
-use aws_sdk_ecs::model::{
+use aws_sdk_ecs::error::SdkError as EcsSdkError;
+use aws_sdk_ecs::operation::describe_task_definition::DescribeTaskDefinitionError;
+use aws_sdk_ecs::types::{
     Compatibility, ContainerDefinition, LaunchType, ResourceRequirement, ResourceType, SortOrder,
     TaskDefinition, TaskStopCode,
 };
@@ -138,13 +138,9 @@ where
                 .context(error::TaskRunCreationSnafu)?;
             let run_task_arns: Vec<String> = run_task_output
                 .tasks()
-                .map(|tasks| {
-                    tasks
-                        .iter()
-                        .filter_map(|task| task.task_arn().map(|arn| arn.to_string()))
-                        .collect()
-                })
-                .unwrap();
+                .iter()
+                .filter_map(|task| task.task_arn().map(|arn| arn.to_string()))
+                .collect();
             for task_arn in &run_task_arns {
                 task_arns.push(task_arn.clone());
             }
@@ -249,15 +245,13 @@ async fn test_results(
         .await
         .context(error::TaskDescribeSnafu)?
         .tasks()
-        .map(|tasks| tasks.to_owned())
-        .context(error::NoTaskSnafu)?;
+        .to_owned();
     let passed_count = tasks
         .iter()
         .filter(|task| task.last_status() == Some("STOPPED"))
         .filter(|task| task.stop_code() == Some(&TaskStopCode::EssentialContainerExited))
         .filter(|task| {
             task.containers()
-                .unwrap_or_default()
                 .iter()
                 .filter(|container| container.exit_code() != Some(0))
                 .count()
@@ -270,7 +264,6 @@ async fn test_results(
         .filter(|task| task.stop_code() == Some(&TaskStopCode::EssentialContainerExited))
         .filter(|task| {
             task.containers()
-                .unwrap_or_default()
                 .iter()
                 .filter(|container| container.exit_code() != Some(0))
                 .count()
@@ -309,7 +302,6 @@ async fn wait_for_cluster_ready(
             .await
             .context(error::ClusterDescribeSnafu)?
             .clusters()
-            .context(error::NoTaskSnafu)?
             .first()
             .context(error::NoTaskSnafu)?
             .clone();
@@ -337,13 +329,13 @@ async fn create_or_find_task_definition(
         .send()
         .await;
 
-    if let Err(SdkError::ServiceError(service_error)) = &task_info {
+    if let Err(EcsSdkError::ServiceError(service_error)) = &task_info {
         // If we get an error and it's a ClientException, that means the call worked
         // but the identifier was not found. Anything else and it will be handled
         // below with lookup calls.
         if matches!(
-            &service_error.err().kind,
-            DescribeTaskDefinitionErrorKind::ClientException(_)
+            &service_error.err(),
+            DescribeTaskDefinitionError::ClientException(_)
         ) {
             return create_task_definition(ecs_client, &task_def_name, test_def).await;
         }
@@ -372,7 +364,7 @@ async fn find_task_rev(
         .send()
         .await
         .context(error::TaskDefinitionListSnafu)?;
-    let task_revisions = task_revisions.task_definition_arns().unwrap_or_default();
+    let task_revisions = task_revisions.task_definition_arns();
 
     for task_rev_arn in task_revisions {
         let task_rev_details = ecs_client
@@ -395,50 +387,34 @@ async fn find_task_rev(
 
 /// Compares an individual task definition to see if its settings match the test settings.
 fn is_matching_definition(test_def: &WorkloadTest, task_def: &TaskDefinition) -> bool {
-    if let Some(containers) = task_def.container_definitions() {
-        if containers.len() != 1 {
-            return false;
-        }
-
-        let container_def = &containers[0];
-        if container_def.name().unwrap_or_default() == test_def.name
-            && container_def.image().unwrap_or_default() == test_def.image
-        {
-            // We have the right name and image, now see if there are any resource requirements
-            let res_reqs = container_def.resource_requirements();
-            match res_reqs {
-                Some(reqs) => {
-                    // If the test needs GPU support, then it needs to be one of the resource requirements.
-                    let mut gpu_set = false;
-                    for requirement in reqs {
-                        if matches!(requirement.r#type(), Some(&ResourceType::Gpu))
-                            && requirement.value().unwrap_or_default() == "1"
-                        {
-                            gpu_set = true;
-                        }
-                    }
-
-                    if test_def.gpu != gpu_set {
-                        // Mismatch on GPU settings between this rev and our test
-                        return false;
-                    }
-                }
-                None => {
-                    // If the test needs GPU support but there are no resource requirements, then it is missing from
-                    // the revision and is not a match.
-                    if test_def.gpu {
-                        return false;
-                    }
-                }
-            }
-            return true;
-        }
+    let containers = task_def.container_definitions();
+    if containers.len() != 1 {
+        return false;
     }
-    false
+
+    let container_def = &containers[0];
+    if container_def.name().unwrap_or_default() == test_def.name
+        && container_def.image().unwrap_or_default() == test_def.image
+    {
+        // We have the right name and image, now see if there are any resource requirements
+        let res_reqs = container_def.resource_requirements();
+        // If the test needs GPU support, then it needs to be one of the resource requirements.
+        let mut gpu_set = false;
+        for requirement in res_reqs {
+            if matches!(requirement.r#type(), &ResourceType::Gpu) && requirement.value() == "1" {
+                gpu_set = true;
+            }
+        }
+
+        // Check for a match on GPU settings between this rev and our test
+        test_def.gpu == gpu_set
+    } else {
+        false
+    }
 }
 
 /// Creates a container definition based on the test settings.
-fn create_container_definition(test_def: &WorkloadTest) -> ContainerDefinition {
+fn create_container_definition(test_def: &WorkloadTest) -> Result<ContainerDefinition, Error> {
     let mut builder = ContainerDefinition::builder()
         .name(test_def.name.clone())
         .image(test_def.image.clone())
@@ -455,13 +431,14 @@ fn create_container_definition(test_def: &WorkloadTest) -> ContainerDefinition {
     if test_def.gpu {
         builder = builder.resource_requirements(
             ResourceRequirement::builder()
-                .r#type(aws_sdk_ecs::model::ResourceType::Gpu)
+                .r#type(aws_sdk_ecs::types::ResourceType::Gpu)
                 .value("1")
-                .build(),
+                .build()
+                .context(error::BuildResourceRequirementSnafu)?,
         );
     }
 
-    builder.build()
+    Ok(builder.build())
 }
 
 /// Creates a new task definition for an individual workload test.
@@ -474,7 +451,7 @@ async fn create_task_definition(
         .register_task_definition()
         .family(task_def_name)
         .requires_compatibilities(Compatibility::Ec2)
-        .container_definitions(create_container_definition(test_def))
+        .container_definitions(create_container_definition(test_def)?)
         .send()
         .await
         .context(error::TaskDefinitionCreationSnafu)?;
@@ -559,9 +536,10 @@ mod test_workload_agent {
         if include_gpu {
             builder = builder.resource_requirements(
                 ResourceRequirement::builder()
-                    .r#type(aws_sdk_ecs::model::ResourceType::Gpu)
+                    .r#type(aws_sdk_ecs::types::ResourceType::Gpu)
                     .value("1")
-                    .build(),
+                    .build()
+                    .unwrap(),
             );
         }
 
