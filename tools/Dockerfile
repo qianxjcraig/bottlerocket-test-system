@@ -147,7 +147,7 @@ USER root
 RUN mkdir -p /usr/share/licenses/helm && \
     chown -R builder:builder /usr/share/licenses/helm
 
-ARG HELM_VERSION=3.14.0
+ARG HELM_VERSION=3.15.3
 ARG HELM_SOURCE_URL="https://github.com/helm/helm/archive/refs/tags/v${HELM_VERSION}.tar.gz"
 
 # ARG HELM_BINARY_URL="https://github.com/helm/helm/releases/download/v${HELM_VERSION}/helm-v${HELM_VERSION}-${GOOS}-${GOARCH}.tar.gz.asc"
