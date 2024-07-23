@@ -62,45 +62,69 @@ RUN curl -L "${EKSCTL_BINARY_URL}" \
 FROM build-go as kubernetes-build
 
 USER root
+RUN dnf -y install yq
 RUN mkdir -p /usr/share/licenses/kubernetes && \
     chown -R builder:builder /usr/share/licenses/kubernetes
 
-ARG K8S_VERSION=1.26.3
-ARG K8S_SOURCE_URL="https://github.com/kubernetes/kubernetes/archive/refs/tags/v${K8S_VERSION}.tar.gz"
+ARG K8S_MINOR_VERSION=1-27
+ARG EKSD_PATCH_VERSION=35
 
-ARG KUBEADM_BINARY_URL="https://dl.k8s.io/release/v${K8S_VERSION}/bin/linux/${GOARCH}/kubeadm"
-ARG KUBECTL_BINARY_URL="https://dl.k8s.io/release/v${K8S_VERSION}/bin/linux/${GOARCH}/kubectl"
+ARG K8S_SOURCE_URL="https://github.com/aws/eks-distro/archive/refs/tags/v${K8S_MINOR_VERSION}-eks-${EKSD_PATCH_VERSION}.tar.gz"
+ARG EKSD_RELEASE_MANIFEST="https://distro.eks.amazonaws.com/kubernetes-${K8S_MINOR_VERSION}/kubernetes-${K8S_MINOR_VERSION}-eks-${EKSD_PATCH_VERSION}.yaml"
 
 USER builder
 WORKDIR /home/builder/
 RUN mkdir kubernetes && \
-    curl -L "${K8S_SOURCE_URL}" -o "kubernetes_${K8S_VERSION}.tar.gz" && \
-    grep "kubernetes_${K8S_VERSION}.tar.gz" \
+    curl -L "${K8S_SOURCE_URL}" -o "kubernetes_${K8S_MINOR_VERSION}-${EKSD_PATCH_VERSION}.tar.gz" && \
+    grep "kubernetes_${K8S_MINOR_VERSION}-${EKSD_PATCH_VERSION}.tar.gz" \
       /hashes/kubernetes | sha512sum --check - && \
-    tar -xf "kubernetes_${K8S_VERSION}.tar.gz" \
+    tar -xf "kubernetes_${K8S_MINOR_VERSION}-${EKSD_PATCH_VERSION}.tar.gz" \
       --strip-components 1 -C kubernetes && \
-    rm "kubernetes_${K8S_VERSION}.tar.gz"
+    rm "kubernetes_${K8S_MINOR_VERSION}-${EKSD_PATCH_VERSION}.tar.gz"
 
 WORKDIR /home/builder/kubernetes/
 
 # We don't need to run `go mod vendor` to generate the vendored code:
 # upstream kubernetes already vendors all its dependencies
 RUN cp -p LICENSE /usr/share/licenses/kubernetes && \
+    go mod vendor && \
     /usr/libexec/tools/bottlerocket-license-scan \
       --clarify /clarify.toml \
       --spdx-data /usr/libexec/tools/spdx-data \
       --out-dir /usr/share/licenses/kubernetes/vendor \
       go-vendor ./vendor
-RUN curl -L "${KUBEADM_BINARY_URL}" \
-      -o "kubeadm_${K8S_VERSION}_${GOOS}_${GOARCH}" && \
-    grep "kubeadm_${K8S_VERSION}_${GOOS}_${GOARCH}" \
-      /hashes/kubernetes | sha512sum --check - && \
-    install -m 0755 "kubeadm_${K8S_VERSION}_${GOOS}_${GOARCH}" ./kubeadm
-RUN curl -L "${KUBECTL_BINARY_URL}" \
-      -o "kubectl_${K8S_VERSION}_${GOOS}_${GOARCH}" && \
-    grep "kubectl_${K8S_VERSION}_${GOOS}_${GOARCH}" \
-      /hashes/kubernetes | sha512sum --check - && \
-    install -m 0755 "kubectl_${K8S_VERSION}_${GOOS}_${GOARCH}" ./kubectl
+
+RUN curl -L "${EKSD_RELEASE_MANIFEST}" -o "kubernetes-${K8S_MINOR_VERSION}-eks-${EKSD_PATCH_VERSION}.yaml" && \
+  grep "kubernetes-${K8S_MINOR_VERSION}-eks-${EKSD_PATCH_VERSION}.yaml" \
+    /hashes/kubernetes | sha512sum --check -
+
+RUN yq ".status.components.[] | \
+  select(.name ==  \"kubernetes\").assets.[] | \
+  select(.name ==  \"bin/${GOOS}/${GOARCH}/kubeadm\") \
+  .archive.uri" "kubernetes-${K8S_MINOR_VERSION}-eks-${EKSD_PATCH_VERSION}.yaml" | \
+  xargs curl -L \
+      -o "kubeadm_${K8S_MINOR_VERSION}-${EKSD_PATCH_VERSION}_${GOOS}_${GOARCH}" && \
+  EXPECTED_CHECKSUM=$(yq ".status.components.[] | \
+    select(.name == \"kubernetes\").assets.[] | \
+    select(.name == \"bin/${GOOS}/${GOARCH}/kubeadm\") \
+    .archive.sha512" "kubernetes-${K8S_MINOR_VERSION}-eks-${EKSD_PATCH_VERSION}.yaml") && \
+  sha512sum "kubeadm_${K8S_MINOR_VERSION}-${EKSD_PATCH_VERSION}_${GOOS}_${GOARCH}" | \
+    awk "\$1!=\"${EXPECTED_CHECKSUM}\"{print \"checksum mismatch\"; exit 1}" && \
+  install -m 0755 "kubeadm_${K8S_MINOR_VERSION}-${EKSD_PATCH_VERSION}_${GOOS}_${GOARCH}" ./kubeadm
+
+RUN yq ".status.components.[] | \
+    select(.name == \"kubernetes\").assets.[] | \
+    select(.name == \"bin/${GOOS}/${GOARCH}/kubectl\") \
+    .archive.uri" "kubernetes-${K8S_MINOR_VERSION}-eks-${EKSD_PATCH_VERSION}.yaml" | \
+  xargs curl -L \
+      -o "kubectl_${K8S_MINOR_VERSION}-${EKSD_PATCH_VERSION}_${GOOS}_${GOARCH}" && \
+  EXPECTED_CHECKSUM=$(yq ".status.components.[] | \
+    select(.name == \"kubernetes\").assets.[] | \
+    select(.name == \"bin/${GOOS}/${GOARCH}/kubectl\") \
+    .archive.sha512" "kubernetes-${K8S_MINOR_VERSION}-eks-${EKSD_PATCH_VERSION}.yaml") && \
+  sha512sum "kubectl_${K8S_MINOR_VERSION}-${EKSD_PATCH_VERSION}_${GOOS}_${GOARCH}" | \
+    awk "\$1!=\"${EXPECTED_CHECKSUM}\"{print \"checksum mismatch\"; exit 1}" && \
+  install -m 0755 "kubectl_${K8S_MINOR_VERSION}-${EKSD_PATCH_VERSION}_${GOOS}_${GOARCH}" ./kubectl
 
 # =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^=
 FROM build-go as sonobuoy-build
