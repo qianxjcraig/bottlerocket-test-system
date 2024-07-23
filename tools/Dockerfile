@@ -7,6 +7,7 @@ USER root
 COPY ./hashes /hashes
 COPY ./clarify.toml /clarify.toml
 COPY ./eksctl.clarify.toml /eksctl.clarify.toml
+COPY ./sonobuoy.clarify.toml /sonobuoy.clarify.toml
 
 # =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^= =^..^=
 # Shared build stage used to build Go binaries.
@@ -108,7 +109,7 @@ USER root
 RUN mkdir -p /usr/share/licenses/sonobuoy && \
     chown -R builder:builder /usr/share/licenses/sonobuoy
 
-ARG SONOBUOY_VERSION=0.56.15
+ARG SONOBUOY_VERSION=0.57.1
 ARG SONOBUOY_SOURCE_URL="https://github.com/vmware-tanzu/sonobuoy/archive/refs/tags/v${SONOBUOY_VERSION}.tar.gz"
 
 ARG SONOBUOY_BINARY_URL="https://github.com/vmware-tanzu/sonobuoy/releases/download/v${SONOBUOY_VERSION}/sonobuoy_${SONOBUOY_VERSION}_linux_${GOARCH}.tar.gz"
@@ -128,7 +129,7 @@ WORKDIR /home/builder/sonobuoy/
 RUN go mod vendor
 RUN cp -p LICENSE /usr/share/licenses/sonobuoy && \
     /usr/libexec/tools/bottlerocket-license-scan \
-      --clarify /clarify.toml \
+      --clarify /sonobuoy.clarify.toml \
       --spdx-data /usr/libexec/tools/spdx-data \
       --out-dir /usr/share/licenses/sonobuoy/vendor \
       go-vendor ./vendor
