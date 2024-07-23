@@ -6,6 +6,15 @@ The format is inspired by [Keep a Changelog](https://keepachangelog.com/en/1.0.0
 Since this project is only a vessel for packaging a few binary tools, its adherence to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html) is loose at best.
 
+## [0.9.0] - 2024-07-23
+
+Update Bottlerocket SDK to 0.42.0
+Update kubernetes to EKSD 1.27.35
+Update eksctl to 0.187.0
+Update helm to 3.15.3
+Update aws-iam-authenticator to 0.6.21
+Update sonobuoy to 0.57.1
+
 ## [0.8.0] - 2024-01-29
 
 Update eksctl to 0.169.0
