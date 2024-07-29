@@ -41,6 +41,8 @@ jobs:
       labels: bottlerocket_ubuntu-latest_16-core
     steps:
       - uses: actions/checkout@v4
+      # Build local tools container in case we are working on a new tools release
+      - run: make tools
       - run: make images
   license-check:
     # A small machine is OK for this independent job.
