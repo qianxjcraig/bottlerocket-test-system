@@ -2,14 +2,12 @@ name: Build
 on:
   pull_request:
     paths-ignore:
-      - '**.md'
       - 'docs/**'
       - 'tools/**'
       - '.github/dependabot.yml'
       - 'bottlerocket/tests/workload/**'
   push:
     paths-ignore:
-      - '**.md'
       - 'docs/**'
       - 'tools/**'
       - '.github/dependabot.yml'
