@@ -6,7 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
-[Unreleased]: https://github.com/bottlerocket-os/bottlerocket-test-system/compare/v0.0.13...develop
+[Unreleased]: https://github.com/bottlerocket-os/bottlerocket-test-system/compare/v0.0.14...develop
+
+## [0.0.14] - 2024-07-31
+
+### Fixed
+
+- fixed a bug preventing test names from being printed by `cli status` ([#932])
+
+[#932]: https://github.com/bottlerocket-os/bottlerocket-test-system/pull/932
+
+[0.0.14]: https://github.com/bottlerocket-os/bottlerocket-test-system/tree/v0.0.14
 
 ## [0.0.13] - 2024-07-31
 
