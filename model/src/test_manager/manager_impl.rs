@@ -200,7 +200,7 @@ impl TestManager {
     where
         S: Into<String>,
     {
-        let resource_crd = self.resource_client().get(&resource.into()).await;
+        let resource_crd = self.resource_client().get(resource.into()).await;
         match resource_crd {
             // if the resource exists, retrieve the pod based on the truncated resource name + UID + resource state
             Ok(resource_object) => {
