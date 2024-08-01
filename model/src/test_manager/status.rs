@@ -174,9 +174,6 @@ impl From<&StatusSnapshot> for Table {
 
         let mut table = Builder::from_iter(status_data)
             .index()
-            // index is needed to use `transpose` however, we don't want the index to show, so
-            // `hide` is used as well.
-            .hide()
             .transpose()
             .to_owned()
             .build();
@@ -379,5 +376,65 @@ fn crd_progress(crd: &Crd) -> Vec<String> {
             .and_then(|res| res.other_info.to_owned())
             .into_iter()
             .collect(),
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use crate::{Test, TestSpec};
+    use kube::api::ObjectMeta;
+    use std::collections::BTreeMap;
+
+    fn create_test_crd(
+        name: &str,
+        namespace: &str,
+        labels: Option<&BTreeMap<String, String>>,
+        test_spec: TestSpec,
+    ) -> Test {
+        Test {
+            metadata: ObjectMeta {
+                name: Some(name.to_owned()),
+                namespace: Some(namespace.to_owned()),
+                labels: labels.cloned(),
+                ..Default::default()
+            },
+            spec: test_spec,
+            status: None,
+        }
+    }
+
+    #[test]
+    fn status_snapshot() {
+        let crds = vec![
+            Crd::Test(create_test_crd(
+                "test1-name",
+                "test",
+                None,
+                TestSpec::default(),
+            )),
+            Crd::Test(create_test_crd(
+                "test2-name",
+                "test",
+                None,
+                TestSpec::default(),
+            )),
+        ];
+        let mut snapshot = StatusSnapshot::new(crds);
+        snapshot.add_column(StatusColumn::name());
+        snapshot.add_column(StatusColumn::crd_type());
+        snapshot.add_column(StatusColumn::state());
+        snapshot.add_column(StatusColumn::passed());
+        snapshot.add_column(StatusColumn::failed());
+        snapshot.add_column(StatusColumn::skipped());
+
+        let snapshot_str = format!("{:width$}", &snapshot, width = 80);
+        let expected =
+            " NAME             TYPE       STATE             PASSED       FAILED      SKIPPED 
+ test1-name       Test       unknown                                            
+ test2-name       Test       unknown                                            ";
+
+        println!("{}", snapshot_str);
+        assert_eq!(snapshot_str, expected);
     }
 }
